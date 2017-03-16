@@ -149,6 +149,7 @@
   <ItemGroup>
     <ClCompile Include="Capacitor.cpp" />
     <ClCompile Include="CircuitSimulator.cpp" />
+    <ClCompile Include="CNT.cpp" />
     <ClCompile Include="IndCurrentSource.cpp" />
     <ClCompile Include="Inductor.cpp" />
     <ClCompile Include="IndVoltageSource.cpp" />
@@ -161,6 +162,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Capacitor.h" />
+    <ClInclude Include="CNT.h" />
     <ClInclude Include="Component.h" />
     <ClInclude Include="IndCurrentSource.h" />
     <ClInclude Include="Inductor.h" />

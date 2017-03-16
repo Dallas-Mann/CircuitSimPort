@@ -526,14 +526,18 @@ void Netlist::solveTimeTrapezoidalRule(string& outputFilename)
 	fileWriter.close();
 }
 
-double Netlist::calcMagnitude(int row, int col)
+double Netlist::calcMagnitude(int row, Matrix<std::complex<double>, Dynamic, 1>& matrix)
 {
-	return 0.0;
+	double real = matrix(row, 0).real;
+	double imag = matrix(row, 0).imag;
+	return sqrt((real * real) + (imag * imag));
 }
 
-double Netlist::calcPhase(int row, int col)
+double Netlist::calcPhase(int row, Matrix<std::complex<double>, Dynamic, 1>& matrix)
 {
-	return 0.0;
+	double real = matrix(row, 0).real;
+	double imag = matrix(row, 0).imag;
+	return atan(imag/real);
 }
 
 void Netlist::prettyPrintNetlist()

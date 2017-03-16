@@ -51,6 +51,9 @@
     <ClCompile Include="VCCS.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CNT.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Netlist.h">
@@ -87,6 +90,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="VCVS.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CNT.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

@@ -68,8 +68,8 @@ private:
 	void solveFrequency(string& filename);
 	void solveTimeBackwardEuler(string& filename);
 	void solveTimeTrapezoidalRule(string& filename);
-	double calcMagnitude(int row, int col);
-	double calcPhase(int row, int col);
+	double calcMagnitude(int row, Matrix<std::complex<double>, Dynamic, 1>& matrix);
+	double calcPhase(int row, Matrix<std::complex<double>, Dynamic, 1>& matrix);
 	bool isANumber(string& token);
 	string* splitString(string& token);
 };
