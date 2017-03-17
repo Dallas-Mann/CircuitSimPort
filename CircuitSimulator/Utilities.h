@@ -6,18 +6,26 @@ using std::cerr;
 using std::cout;
 using std::endl;
 
+#include <vector>
+using std::vector;
+
 #include <string>
 using std::string;
 
-// Print the correct usage in case of user syntax error.
-static void Usage(char* arg, string message) {
-	cerr << endl << "Message: " << message << endl;
-	cerr << "Usage:   " << arg << " <netlist.txt> <soultion.txt>" << endl;
-	exit(-1);
-}
+#include <fstream>
+using std::ifstream;
+using std::ofstream;
 
-static void Error(string message) {
-	cerr << endl << "Message: " << message << endl;
-	exit(-1);
-}
+#include "Component.h"
+
+class Utilities {
+public:
+	static void Usage(char* arg, string message);
+	static void Error(string message);
+	static vector<string> parseLine(string& nextLine);
+	static Component* parseComponent(vector<string>& tokens);
+	static double convert(string& token);
+	static bool isANumber(string& token);
+	static string* splitString(string& token);
+};
 #endif

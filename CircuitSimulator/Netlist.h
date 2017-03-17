@@ -34,6 +34,7 @@ class Netlist {
 public:
 	Netlist();
 	void readNetlist(string inputFilename);
+	void populateMatrices();
 	void simulate(string outputFilename);
 	vector<int> nodes;
 	void prettyPrintNetlist();
@@ -46,6 +47,8 @@ private:
 	int numVoltages = 0;
 	int numCurrents = 0;
 	int nodeToTrack = 0;
+	int newIndexCounter;
+	int highestNode = 0;
 
 	SparseMatrix<double, ColMajor> G;
 	Matrix<double, Dynamic, 1> X;
@@ -60,17 +63,13 @@ private:
 	void incrVoltages(int amount);
 	void incrCurrents(int amount);
 	void resizeMatrices();
-	void parseLine(string& nextLine);
-	Component* parseComponent(vector<string>& tokens);
-	double convert(string& token);
-	void calculateNewIndicies();
-	void populateMatrices();
+	void calculateNewIndiciesNonDistributed();
+	void calculateNewIndiciesDistributed();
+	void correctDistributedNodes();
 	void solveFrequency(string& filename);
 	void solveTimeBackwardEuler(string& filename);
 	void solveTimeTrapezoidalRule(string& filename);
 	double calcMagnitude(int row, Matrix<std::complex<double>, Dynamic, 1>& matrix);
 	double calcPhase(int row, Matrix<std::complex<double>, Dynamic, 1>& matrix);
-	bool isANumber(string& token);
-	string* splitString(string& token);
 };
 #endif

@@ -8,11 +8,13 @@
 #include "IndCurrentSource.h"
 #include "VCVS.h"
 #include "VCCS.h"
+//TODO: implement these three components
 //#include "MutualInductance.h"
 //#include "OpAmp.h"
 //#include "VAC.h"
 #include "VPulse.h"
 #include "VStep.h"
+#include "CNT.h"
 
 #include <Eigen/SparseLU>
 #include <Eigen/Eigen>
@@ -36,6 +38,66 @@ void Netlist::incrCurrents(int amount)
 	numCurrents += amount;
 }
 
+void Netlist::readNetlist(string inputFilename)
+{
+	// attempt to open file
+	ifstream fileReader(inputFilename);
+	if (fileReader.fail())
+		Utilities::Error("problem opening the input file");
+
+	vector<string> tokens;
+	string nextLine;
+	std::getline(fileReader, nextLine);
+	while (!(nextLine == ".end")) {
+		tokens = Utilities::parseLine(nextLine);
+
+		if (tokens.at(0).at(0) == '.') {
+			if (tokens.at(0).substr(1) == "freq") {
+				solutions.push_back(solutionType::FREQ);
+				std::istringstream(tokens.at(1)) >> nodeToTrack;
+				nodeToTrack -= 1;
+			}
+			else if (tokens.at(0).substr(1) == "timeeuler") {
+				solutions.push_back(solutionType::TIMEEULER);
+				std::istringstream(tokens.at(1)) >> nodeToTrack;
+				nodeToTrack -= 1;
+			}
+			else if (tokens.at(0).substr(1) == "timetrapezoidal") {
+				solutions.push_back(solutionType::TIMETRAPEZOIDAL);
+				std::istringstream(tokens.at(1)) >> nodeToTrack;
+				nodeToTrack -= 1;
+			}
+			else if (tokens.at(0).substr(1) == "dc") {
+				solutions.push_back(solutionType::DC);
+			}
+			else {
+				Utilities::Error("Unrecognized solution type.");
+				exit(-1);
+			}
+		}
+		else if (tokens.at(0).at(0) == '#') {
+			//do nothing, it's a comment
+		}
+		else {
+			int nodeOne = stoi(tokens.at(1));
+			int nodeTwo = stoi(tokens.at(2));
+
+			if (nodeOne > highestNode)
+				highestNode = nodeOne;
+			if (nodeTwo > highestNode)
+				highestNode = nodeTwo;
+
+			Component* newComponent = Utilities::parseComponent(tokens);
+			circuitElements.push_back(newComponent);
+		}
+
+		std::getline(fileReader, nextLine);
+	}
+	fileReader.close();
+	cout << "finished reading netlist" << endl;
+	//correctDistributedNodes();
+}
+
 void Netlist::resizeMatrices()
 {
 	int dimension = numVoltages + numCurrents;
@@ -52,203 +114,7 @@ void Netlist::resizeMatrices()
 	B.setZero();
 }
 
-void Netlist::readNetlist(string inputFilename)
-{
-	// attempt to open file
-	ifstream fileReader(inputFilename);
-	if (fileReader.fail())
-		Error("problem opening the input file");
-
-	string nextLine;
-	std::getline(fileReader, nextLine);
-	while (!(nextLine == ".end")) {
-		parseLine(nextLine);
-		std::getline(fileReader, nextLine);
-	}
-	fileReader.close();
-	populateMatrices();
-}
-
-void Netlist::parseLine(string& nextLine)
-{
-	std::transform(nextLine.begin(), nextLine.end(), nextLine.begin(), ::tolower);
-
-	string token;
-	vector<string> tokens;
-	while (token != nextLine) {
-		token = nextLine.substr(0, nextLine.find_first_of(" "));
-		nextLine = nextLine.substr(nextLine.find_first_of(" ") + 1);
-		tokens.push_back(token);
-	}
-
-	if (tokens.at(0).at(0) == '.') {
-		if (tokens.at(0).substr(1) == "freq") {
-			solutions.push_back(solutionType::FREQ);
-			std::istringstream(tokens.at(1)) >> nodeToTrack;
-			nodeToTrack -= 1;
-		}
-		else if (tokens.at(0).substr(1) == "timeeuler") {
-			solutions.push_back(solutionType::TIMEEULER);
-			std::istringstream(tokens.at(1)) >> nodeToTrack;
-			nodeToTrack -= 1;
-		}
-		else if (tokens.at(0).substr(1) == "timetrapezoidal") {
-			solutions.push_back(solutionType::TIMETRAPEZOIDAL);
-			std::istringstream(tokens.at(1)) >> nodeToTrack;
-			nodeToTrack -= 1;
-		}
-		else if (tokens.at(0).substr(1) == "dc") {
-			solutions.push_back(solutionType::DC);
-		}
-		else {
-			Error("Unrecognized solution type.");
-			exit(-1);
-		}
-	}
-	else if (tokens.at(0).at(0) == '#') {
-		//do nothing, it's a comment
-	}
-	else {
-		circuitElements.push_back(parseComponent(tokens));
-		//parseComponent(tokens);
-	}
-}
-
-/*
-Letter codes for different circuit elements
-
-Resistor R
-Capacitor C
-Inductor L
-Independent voltage source & stimulus V
-Independent current source & stimulus I
-Voltage-controlled voltage source E
-Voltage-controlled current source G
-Mutual Inductance/Coupling K
-*/
-Component* Netlist::parseComponent(vector<string>& tokens)
-{	
-	Component* newComponent = nullptr;
-
-	int nodeOne;
-	int nodeTwo;
-	nodeOne = std::stoi(tokens.at(1));
-	nodeTwo = std::stoi(tokens.at(2));
-
-	switch (tokens.at(0).at(0)) {
-	case 'r':
-		newComponent = new Resistor(tokens.at(0), nodeOne, nodeTwo, convert(tokens.at(3)));
-		break;
-	case 'c':
-		newComponent = new Capacitor(tokens.at(0), nodeOne, nodeTwo, convert(tokens.at(3)));
-		break;
-	case 'l':
-		newComponent = new Inductor(tokens.at(0), nodeOne, nodeTwo, convert(tokens.at(3)));
-		break;
-	case 'v':
-		newComponent = new IndVoltageSource(tokens.at(0), nodeOne, nodeTwo, convert(tokens.at(3)));
-		break;
-	case 'i':
-		newComponent = new IndCurrentSource(tokens.at(0), nodeOne, nodeTwo, convert(tokens.at(3)));
-		break;
-	case 'e':
-		newComponent = new VCVS(tokens.at(0), nodeOne, nodeTwo, std::stoi(tokens.at(3)), std::stoi(tokens.at(4)), convert(tokens.at(5)));
-		break;
-	case 'g':
-		newComponent = new VCCS(tokens.at(0), nodeOne, nodeTwo, std::stoi(tokens.at(3)), std::stoi(tokens.at(4)), convert(tokens.at(5)));
-		break;
-	/*
-	case 'k':
-
-		break;
-	case 'o':
-
-		break;
-	case 'a':
-
-		break;
-	*/
-	case 'p':
-		newComponent = new VPulse(tokens.at(0), nodeOne, nodeTwo, convert(tokens.at(3)), convert(tokens.at(4)), 
-			convert(tokens.at(5)), convert(tokens.at(6)), convert(tokens.at(7)), std::stoi(tokens.at(8)));
-		break;
-	case 's':
-		newComponent = new VStep(tokens.at(0), nodeOne, nodeTwo, convert(tokens.at(3)), convert(tokens.at(4)),
-			convert(tokens.at(5)), convert(tokens.at(6)), std::stoi(tokens.at(7)));
-		break;
-	default:
-		Error("Unknown component.");
-		exit(-1);
-		break;
-	}
-
-	incrVoltages(newComponent->numVoltagesToAdd(nodes));
-	incrCurrents(newComponent->numCurrentsToAdd());
-
-	return newComponent;
-}
-
-double Netlist::convert(string& token)
-{
-	if (isANumber(token)) {
-		return std::stod(token);
-	}
-	else {
-		/*
-		there should be a trailing modifier after the number
-		F	E-15	femto
-		P	E-12	pico
-		N	E-9		nano
-		U	E-6		micro
-		M	E-3		milli
-		K	E+3		kilo
-		MEG E+6 	mega
-		G 	E+9 	giga
-		T 	E+12 	tera
-		*/
-		string* value = splitString(token);
-		double baseNum = stod(value[0]);
-
-		if (value[1] == "a") {
-			return baseNum *= pow(10, -18);
-		}
-		else if (value[1] == "f") {
-			return baseNum *= pow(10, -15);
-		}
-		else if (value[1] == "p") {
-			return baseNum *= pow(10, -12);
-		}
-		else if (value[1] == "n") {
-			return baseNum *= pow(10, -9);
-		}
-		else if (value[1] == "u") {
-			return baseNum *= pow(10, -6);
-		}
-		else if (value[1] == "m") {
-			return baseNum *= pow(10, -3);
-		}
-		else if (value[1] == "k") {
-			return baseNum *= pow(10, 3);
-		}
-		else if (value[1] == "meg") {
-			return baseNum *= pow(10, 6);
-		}
-		else if (value[1] == "g") {
-			return baseNum *= pow(10, 9);
-		}
-		else if (value[1] == "t") {
-			return baseNum *= pow(10, 12);
-		}
-		else {
-			cerr << "Error: " << token << endl;
-			Error("Unknown value modifier in netlist.");
-			exit(-1);
-		}
-	}
-	return 0.0;
-}
-
-void Netlist::calculateNewIndicies()
+void Netlist::calculateNewIndiciesNonDistributed()
 {
 	// this calculates the new indices for components that need to augment a matrix
 	// calculation of the new indices for components that need to use a 
@@ -257,30 +123,63 @@ void Netlist::calculateNewIndicies()
 	// then we subtract 1 to offset the fact that matrix indices start at 0
 	// this is why we post increment the value newIndex
 
-	int newIndex = numVoltages;
 	for (Component* c : circuitElements) {
 		if (Inductor* p = dynamic_cast<Inductor*> (c)) {
-			p->setNewIndex(newIndex++);
+			p->setNewIndex(newIndexCounter++);
 		}
 		else if (IndVoltageSource* p = dynamic_cast<IndVoltageSource*> (c)) {
-			p->setNewIndex(newIndex++);
+			p->setNewIndex(newIndexCounter++);
 		}
 		else if (VCVS* p = dynamic_cast<VCVS*> (c)) {
-			p->setNewIndex(newIndex++);
+			p->setNewIndex(newIndexCounter++);
 		}
 		else if (VPulse* p = dynamic_cast<VPulse*> (c)) {
-			p->setNewIndex(newIndex++);
+			p->setNewIndex(newIndexCounter++);
 		}
 		else if (VStep* p = dynamic_cast<VStep*> (c)) {
-			p->setNewIndex(newIndex++);
+			p->setNewIndex(newIndexCounter++);
+		}
+	}
+}
+
+void Netlist::calculateNewIndiciesDistributed() {
+
+	cout << "correcting indices of inductors from CNT netlist" << endl;
+
+	for (Component* c : circuitElements) {
+		if (CNT* p = dynamic_cast<CNT*> (c)) {
+			for (Component* c1 : p->subComponents) {
+				if (Inductor* p1 = dynamic_cast<Inductor*> (c1)) {
+					p1->setNewIndex(newIndexCounter++);
+				}
+			}
+		}
+	}
+}
+
+void Netlist::correctDistributedNodes() {
+
+	cout << "correcting distributed node values" << endl;
+
+	for (Component* c : circuitElements) {
+		if (CNT* p = dynamic_cast<CNT*> (c)) {
+			p->setNodeOffset(highestNode - 1);
+			highestNode = p->modifyNodeValues();
 		}
 	}
 }
 
 void Netlist::populateMatrices()
 {
+	for (Component* c : circuitElements) {
+		incrVoltages(c->numVoltagesToAdd(nodes));
+		incrCurrents(c->numCurrentsToAdd());
+	}
+	newIndexCounter = numVoltages;
+
+	calculateNewIndiciesNonDistributed();
+	//calculateNewIndiciesDistributed();
 	resizeMatrices();
-	calculateNewIndicies();
 	for (Component* c : circuitElements) {
 		c->insertStamp(GVals, XVals, CVals, BVals);
 	}
@@ -316,7 +215,7 @@ void Netlist::simulate(string outputFilename)
 			solveTimeTrapezoidalRule(outputFilename);
 			break;
 		case DC:
-			//TODO implement DC analysis(transient at a single time point)
+			//TODO: implement DC analysis(transient at a single time point)
 			break;
 		}
 	}
@@ -368,7 +267,7 @@ void Netlist::solveTimeBackwardEuler(string& outputFilename)
 	// attempt to open file
 	ofstream fileWriter(outputFilename);
 	if (fileWriter.fail())
-		Error("problem opening the output file");
+		Utilities::Error("problem opening the output file");
 	
 	SparseMatrix<double, Eigen::ColMajor> COverH(C), AStatic(G);
 
@@ -377,9 +276,8 @@ void Netlist::solveTimeBackwardEuler(string& outputFilename)
 
 
 	const int size = numVoltages + numCurrents;
-	Matrix<double, Dynamic, 1> BDynamic(size, 1), BCurrentTimePoint(size, 1), XPreviousTimePoint(size, 1), XCurrentTimePoint(size, 1);
+	Matrix<double, Dynamic, 1> BCurrentTimePoint(size, 1), XPreviousTimePoint(size, 1), XCurrentTimePoint(size, 1);
 
-	BDynamic.setZero();
 	BCurrentTimePoint.setZero();
 	XCurrentTimePoint.setZero();
 	XPreviousTimePoint.setZero();
@@ -408,9 +306,7 @@ void Netlist::solveTimeBackwardEuler(string& outputFilename)
 		
 		BCurrentTimePoint(vNewIndex, 0) = vPulseValue;
 		
-		BDynamic = COverH * XPreviousTimePoint;
-
-		BCurrentTimePoint = BCurrentTimePoint + BDynamic;
+		BCurrentTimePoint = COverH * XPreviousTimePoint + BCurrentTimePoint;
 
 		XCurrentTimePoint = solver.solve(BCurrentTimePoint);
 
@@ -419,7 +315,6 @@ void Netlist::solveTimeBackwardEuler(string& outputFilename)
 		fileWriter << currentTime << "\t" << magnitude << endl;
 
 		XPreviousTimePoint = XCurrentTimePoint;
-		//XCurrentTimePoint = X;
 		currentTime += stepSize;
 	}
 
@@ -467,7 +362,7 @@ void Netlist::solveTimeTrapezoidalRule(string& outputFilename)
 	// attempt to open file
 	ofstream fileWriter(outputFilename);
 	if (fileWriter.fail())
-		Error("problem opening the output file");
+		Utilities::Error("problem opening the output file");
 
 	SparseMatrix<double, Eigen::ColMajor> COverH(C), GOverTwo(G), AStatic, BStatic;
 
@@ -519,7 +414,6 @@ void Netlist::solveTimeTrapezoidalRule(string& outputFilename)
 
 		XPreviousTimePoint = XCurrentTimePoint;
 		BPreviousTimePoint = BCurrentTimePoint;
-		//XCurrentTimePoint = X;
 		currentTime += stepSize;
 	}
 
@@ -528,21 +422,21 @@ void Netlist::solveTimeTrapezoidalRule(string& outputFilename)
 
 double Netlist::calcMagnitude(int row, Matrix<std::complex<double>, Dynamic, 1>& matrix)
 {
-	double real = matrix(row, 0).real;
-	double imag = matrix(row, 0).imag;
+	double real = matrix(row, 0).real();
+	double imag = matrix(row, 0).imag();
 	return sqrt((real * real) + (imag * imag));
 }
 
 double Netlist::calcPhase(int row, Matrix<std::complex<double>, Dynamic, 1>& matrix)
 {
-	double real = matrix(row, 0).real;
-	double imag = matrix(row, 0).imag;
+	double real = matrix(row, 0).real();
+	double imag = matrix(row, 0).imag();
 	return atan(imag/real);
 }
 
 void Netlist::prettyPrintNetlist()
 {
-	//TODO add toString functions to each Component derived class
+	//TODO: add toString functions to each Component derived class
 }
 
 void Netlist::prettyPrintMatrices()
@@ -551,31 +445,4 @@ void Netlist::prettyPrintMatrices()
 	cout << "\n\n\nX:\n" << X << endl;
 	cout << "\n\n\nC:\n" << C << endl;
 	cout << "\n\n\nB:\n" << B << endl;
-}
-
-bool Netlist::isANumber(string& token)
-{
-	for (char c : token) {
-		if (!isdigit(c) && c != '.' && c != 'e' && c != '-') {
-			return false;
-		}
-	}
-	return true;
-}
-
-string* Netlist::splitString(string& token)
-{
-	int index = 0;
-	for (char c : token) {
-		if (!isdigit(c) && c != '.') {
-			break;
-		}
-		else
-			index++;
-	}
-
-	string* result = new string[2];
-	result[0] = token.substr(0, index);
-	result[1] = token.substr(index);
-	return result;
 }

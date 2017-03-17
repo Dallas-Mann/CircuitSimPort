@@ -1,0 +1,6 @@
+S1 1 0 1 1p 0 150p 1000
+C1 1 0 140a
+T1 1 2 mcc10.txt
+C2 2 0 49a
+.timetrapezoidal 2
+.end
