@@ -1,5 +1,8 @@
+#define _USE_MATH_DEFINES
+#define _SCL_SECURE_NO_WARNINGS
+#include <cmath>
+
 #include "Netlist.h"
-#include <math.h>
 
 #include "Resistor.h"
 #include "Capacitor.h"
@@ -8,10 +11,10 @@
 #include "IndCurrentSource.h"
 #include "VCVS.h"
 #include "VCCS.h"
-//TODO: implement these three components
+//TODO: implement these components
 //#include "MutualInductance.h"
 //#include "OpAmp.h"
-//#include "VAC.h"
+#include "VAC.h"
 #include "VPulse.h"
 #include "VStep.h"
 #include "CNT.h"
@@ -54,6 +57,11 @@ void Netlist::readNetlist(string inputFilename)
 		if (tokens.at(0).at(0) == '.') {
 			if (tokens.at(0).substr(1) == "freq") {
 				solutions.push_back(solutionType::FREQ);
+				std::istringstream(tokens.at(1)) >> nodeToTrack;
+				nodeToTrack -= 1;
+			}
+			else if (tokens.at(0).substr(1) == "freqmor") {
+				solutions.push_back(solutionType::FREQMOR);
 				std::istringstream(tokens.at(1)) >> nodeToTrack;
 				nodeToTrack -= 1;
 			}
@@ -137,6 +145,9 @@ void Netlist::calculateNewIndiciesNonDistributed()
 			p->setNewIndex(newIndexCounter++);
 		}
 		else if (VStep* p = dynamic_cast<VStep*> (c)) {
+			p->setNewIndex(newIndexCounter++);
+		}
+		else if (VAC* p = dynamic_cast<VAC*> (c)) {
 			p->setNewIndex(newIndexCounter++);
 		}
 	}
@@ -223,7 +234,74 @@ void Netlist::simulate(string outputFilename)
 
 void Netlist::solveFrequency(string& outputFilename)
 {
+	int VACNewIndex = 0;
+	double VACAmplitude = 0;
+	double stepSize = 0;
+	double currentFreq = 0;
+	double numSteps = 0;
+	double magnitude = 0;
+	double phase = 0;
 
+	//can only sweep one VAC Source at the moment
+	for (Component* c : circuitElements) {
+		if (VAC* p = dynamic_cast<VAC*> (c)) {
+			VACNewIndex = p->newIndex;
+			VACAmplitude = p->amplitude;
+			stepSize = (p->maxFrequency - p->minFrequency) / p->numSteps;
+			currentFreq = p->minFrequency;
+			numSteps = p->numSteps;
+			break;
+		}
+	}
+
+	// attempt to open file
+	ofstream fileWriter(outputFilename);
+	if (fileWriter.fail())
+		Utilities::Error("problem opening the output file");
+
+	SparseMatrix<std::complex<double>, Eigen::ColMajor> GPlusSC;
+	double wSweep;
+	std::complex<double> s;
+	const int size = numVoltages + numCurrents;
+	Matrix<std::complex<double>, Dynamic, 1> BNew(size, 1), XNew(size, 1);
+
+	GPlusSC.setZero();
+	BNew.setZero();
+	XNew.setZero();
+
+	SparseLU<SparseMatrix<std::complex<double>, ColMajor>, COLAMDOrdering<int>> solver;
+
+	for (int i = 0; i < numSteps; i++, currentFreq += stepSize) {
+		if (currentFreq > 0) {
+			//remove dc components from B matrix
+			BNew.setZero();
+			//set AC component magnitude to amplitude
+			BNew(VACNewIndex, 0) = VACAmplitude;
+
+			//create static A matrix
+			wSweep = 2 * M_PI * currentFreq;
+			s.imag(wSweep);			
+			GPlusSC = G.cast<std::complex<double>>() + (s * C.cast<std::complex<double>>());
+
+			//set up solver
+			GPlusSC.makeCompressed();
+			solver.compute(GPlusSC);
+			//solve system
+			XNew = solver.solve(BNew);
+
+			magnitude = calcMagnitude(nodeToTrack, XNew);
+			phase = calcPhase(nodeToTrack, XNew);
+
+			//print to file
+			fileWriter << currentFreq << "\t" << magnitude << "\t" << phase << endl;
+		}
+	}
+	fileWriter.close();
+}
+
+void Netlist::solveFrequencyMOR(string& outputFilename)
+{
+	
 }
 
 void Netlist::solveTimeBackwardEuler(string& outputFilename)
@@ -258,10 +336,6 @@ void Netlist::solveTimeBackwardEuler(string& outputFilename)
 			riseTime = p->riseTime;
 			pulseWidth = p->maxTime;
 		}
-		else {
-			//free memory from unused Component objects
-			c->~Component();
-		}
 	}
 
 	// attempt to open file
@@ -273,7 +347,6 @@ void Netlist::solveTimeBackwardEuler(string& outputFilename)
 
 	COverH /= stepSize;
 	AStatic += COverH;
-
 
 	const int size = numVoltages + numCurrents;
 	Matrix<double, Dynamic, 1> BCurrentTimePoint(size, 1), XPreviousTimePoint(size, 1), XCurrentTimePoint(size, 1);
@@ -287,8 +360,8 @@ void Netlist::solveTimeBackwardEuler(string& outputFilename)
 	AStatic.makeCompressed();
 	solver.compute(AStatic);
 
-	for (int i = 0; i < numSteps; i++) {
-		BCurrentTimePoint = B;
+	for (int i = 0; i < numSteps; i++, currentTime += stepSize) {
+		BCurrentTimePoint.setZero();
 
 		//calculate VPulseValue
 		if (0 <= currentTime && currentTime <= riseTime) {
@@ -315,7 +388,6 @@ void Netlist::solveTimeBackwardEuler(string& outputFilename)
 		fileWriter << currentTime << "\t" << magnitude << endl;
 
 		XPreviousTimePoint = XCurrentTimePoint;
-		currentTime += stepSize;
 	}
 
 	fileWriter.close();
@@ -353,10 +425,6 @@ void Netlist::solveTimeTrapezoidalRule(string& outputFilename)
 			riseTime = p->riseTime;
 			pulseWidth = p->maxTime;
 		}
-		else {
-			//free memory from unused Component objects
-			c->~Component();
-		}
 	}
 
 	// attempt to open file
@@ -385,8 +453,8 @@ void Netlist::solveTimeTrapezoidalRule(string& outputFilename)
 	AStatic.makeCompressed();
 	solver.compute(AStatic);
 
-	for (int i = 0; i < numSteps; i++) {
-		BCurrentTimePoint = B;
+	for (int i = 0; i < numSteps; i++, currentTime += stepSize) {
+		BCurrentTimePoint.setZero();
 
 		//calculate VPulseValue
 		if (0 <= currentTime && currentTime <= riseTime) {
@@ -414,7 +482,6 @@ void Netlist::solveTimeTrapezoidalRule(string& outputFilename)
 
 		XPreviousTimePoint = XCurrentTimePoint;
 		BPreviousTimePoint = BCurrentTimePoint;
-		currentTime += stepSize;
 	}
 
 	fileWriter.close();
@@ -441,6 +508,7 @@ void Netlist::prettyPrintNetlist()
 
 void Netlist::prettyPrintMatrices()
 {
+	//TODO: print the matrices to a excel spreadsheet or something
 	cout << "\n\n\nG:\n" << G << endl;
 	cout << "\n\n\nX:\n" << X << endl;
 	cout << "\n\n\nC:\n" << C << endl;

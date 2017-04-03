@@ -10,7 +10,7 @@
 //TODO: implement these three components
 //#include "MutualInductance.h"
 //#include "OpAmp.h"
-//#include "VAC.h"
+#include "VAC.h"
 #include "VPulse.h"
 #include "VStep.h"
 #include "CNT.h"
@@ -80,10 +80,11 @@ Component* Utilities::parseComponent(vector<string>& tokens)
 		case 'o':
 
 		break;
-		case 'a':
-
-		break;
 		*/
+	case 'a':
+		newComponent = new VAC(tokens.at(0), nodeOne, nodeTwo, convert(tokens.at(3)), convert(tokens.at(4)),
+			convert(tokens.at(5)), convert(tokens.at(6)), std::stoi(tokens.at(7)));
+		break;
 	case 'p':
 		newComponent = new VPulse(tokens.at(0), nodeOne, nodeTwo, convert(tokens.at(3)), convert(tokens.at(4)),
 			convert(tokens.at(5)), convert(tokens.at(6)), convert(tokens.at(7)), std::stoi(tokens.at(8)));

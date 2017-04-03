@@ -157,6 +157,7 @@
     <ClCompile Include="Netlist.cpp" />
     <ClCompile Include="Resistor.cpp" />
     <ClCompile Include="Utilities.cpp" />
+    <ClCompile Include="VAC.cpp" />
     <ClCompile Include="VCCS.cpp" />
     <ClCompile Include="VCVS.cpp" />
     <ClCompile Include="VPulse.cpp" />
@@ -172,6 +173,7 @@
     <ClInclude Include="Netlist.h" />
     <ClInclude Include="Resistor.h" />
     <ClInclude Include="Utilities.h" />
+    <ClInclude Include="VAC.h" />
     <ClInclude Include="VCCS.h" />
     <ClInclude Include="VCVS.h" />
     <ClInclude Include="VPulse.h" />

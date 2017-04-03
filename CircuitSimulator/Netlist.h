@@ -28,7 +28,7 @@ using Eigen::Dynamic;
 using Eigen::Triplet;
 using Eigen::ColMajor;
 
-enum solutionType {FREQ, DC, TIMEEULER, TIMETRAPEZOIDAL};
+enum solutionType {FREQ, FREQMOR, DC, TIMEEULER, TIMETRAPEZOIDAL};
 
 class Netlist {
 public:
@@ -67,6 +67,7 @@ private:
 	void calculateNewIndiciesDistributed();
 	void correctDistributedNodes();
 	void solveFrequency(string& filename);
+	void solveFrequencyMOR(string& filename);
 	void solveTimeBackwardEuler(string& filename);
 	void solveTimeTrapezoidalRule(string& filename);
 	double calcMagnitude(int row, Matrix<std::complex<double>, Dynamic, 1>& matrix);
