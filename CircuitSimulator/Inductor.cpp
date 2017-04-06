@@ -9,11 +9,11 @@ void Inductor::insertStamp(vector<T>& GVals, vector<T>& XVals, vector<T>& CVals,
 	// because of this we need to offset all the matrix indices by -1
 	int indexOne = nodeOne - 1;
 	int indexTwo = nodeTwo - 1;
-	if (!nodeOne == 0) {
+	if (nodeOne != 0) {
 		GVals.push_back({ indexOne, newIndex, 1 });
 		GVals.push_back({ newIndex, indexOne, 1 });
 	}
-	if (!nodeTwo == 0) {
+	if (nodeTwo != 0) {
 		GVals.push_back({ indexTwo, newIndex, -1 });
 		GVals.push_back({ newIndex, indexTwo, -1 });
 	}

@@ -1,7 +1,6 @@
 #define _USE_MATH_DEFINES
 #define _SCL_SECURE_NO_WARNINGS
-#include <cmath>
-
+#include <ctime>
 #include "Netlist.h"
 
 #include "Resistor.h"
@@ -21,8 +20,8 @@
 
 #include <Eigen/SparseLU>
 #include <Eigen/Eigen>
+#include<Eigen/IterativeLinearSolvers>
 using Eigen::SparseLU;
-using Eigen::PartialPivLU;
 using Eigen::ColMajor;
 using Eigen::COLAMDOrdering;
 
@@ -219,6 +218,9 @@ void Netlist::simulate(string outputFilename)
 		case FREQ:
 			solveFrequency(outputFilename);
 			break;
+		case FREQMOR:
+			solveFrequencyMOR(outputFilename);
+			break;
 		case TIMEEULER:
 			solveTimeBackwardEuler(outputFilename);
 			break;
@@ -259,7 +261,7 @@ void Netlist::solveFrequency(string& outputFilename)
 	if (fileWriter.fail())
 		Utilities::Error("problem opening the output file");
 
-	SparseMatrix<std::complex<double>, Eigen::ColMajor> GPlusSC;
+	SparseMatrix<std::complex<double>, ColMajor> GPlusSC;
 	double wSweep;
 	std::complex<double> s;
 	const int size = numVoltages + numCurrents;
@@ -301,7 +303,99 @@ void Netlist::solveFrequency(string& outputFilename)
 
 void Netlist::solveFrequencyMOR(string& outputFilename)
 {
+	cout << "Using Model Order Reduction" << endl;
+
+	int VACNewIndex = 0;
+	double VACAmplitude = 0;
+	double stepSize = 0;
+	double currentFreq = 0;
+	double numSteps = 0;
+	double magnitude = 0;
+	double phase = 0;
+
+	//can only sweep one VAC Source at the moment
+	for (Component* c : circuitElements) {
+		if (VAC* p = dynamic_cast<VAC*> (c)) {
+			VACNewIndex = p->newIndex;
+			VACAmplitude = p->amplitude;
+			stepSize = (p->maxFrequency - p->minFrequency) / p->numSteps;
+			currentFreq = p->minFrequency;
+			numSteps = p->numSteps;
+			break;
+		}
+	}
+
+	// attempt to open file
+	ofstream fileWriter(outputFilename);
+	if (fileWriter.fail())
+		Utilities::Error("problem opening the output file");
+
+	int numberOfMoments = 100;
+	const int size = numVoltages + numCurrents;
+
+	//setup B matrix to be normalized
+	Matrix<double, Dynamic, 1> BNew(size, 1), Moment(size, 1);
+	//remove dc components from B matrix
+	BNew.setZero();
+	Moment.setZero();
+	//set AC component magnitude to amplitude
+	BNew(VACNewIndex, 0) = VACAmplitude;
+
+	Matrix<double, Dynamic, 1> prevMoment;
+	SparseMatrix<double, ColMajor> krylovSubspace(size, numberOfMoments);
+	//set up solver to find moments
+	SparseLU<SparseMatrix<double, ColMajor>, COLAMDOrdering<int>> solver;
+	G.makeCompressed();
+	solver.compute(G);
+	//solve for first moment
+	prevMoment = solver.solve(BNew);
+	//add first moment to krylov subspace
+	krylovSubspace.col(0) = prevMoment.sparseView();
+	//use the first moment to generate the rest of the moments
+	for (int currentMoment = 1; currentMoment < numberOfMoments; currentMoment++) {
+		prevMoment = solver.solve(-C * prevMoment);
+		krylovSubspace.col(currentMoment) = prevMoment.sparseView();
+	}
+
+	cout << "Done generating krylov subspace" << endl;
+	/*
+	double wSweep;
+	std::complex<double> s;
+	const int size = numVoltages + numCurrents;
+	Matrix<std::complex<double>, Dynamic, 1> BNew(size, 1), XNew(size, 1);
+
+	BNew.setZero();
+	XNew.setZero();
+
 	
+
+	for (int i = 0; i < numSteps; i++, currentFreq += stepSize) {
+		if (currentFreq > 0) {
+			//remove dc components from B matrix
+			BNew.setZero();
+			//set AC component magnitude to amplitude
+			BNew(VACNewIndex, 0) = VACAmplitude;
+
+			//create static A matrix
+			wSweep = 2 * M_PI * currentFreq;
+			s.imag(wSweep);
+			GPlusSC = G.cast<std::complex<double>>() + (s * C.cast<std::complex<double>>());
+
+			//set up solver
+			GPlusSC.makeCompressed();
+			solver.compute(GPlusSC);
+			//solve system
+			XNew = solver.solve(BNew);
+
+			magnitude = calcMagnitude(nodeToTrack, XNew);
+			phase = calcPhase(nodeToTrack, XNew);
+
+			//print to file
+			fileWriter << currentFreq << "\t" << magnitude << "\t" << phase << endl;
+		}
+	}
+	fileWriter.close();
+	*/
 }
 
 void Netlist::solveTimeBackwardEuler(string& outputFilename)
@@ -343,7 +437,7 @@ void Netlist::solveTimeBackwardEuler(string& outputFilename)
 	if (fileWriter.fail())
 		Utilities::Error("problem opening the output file");
 	
-	SparseMatrix<double, Eigen::ColMajor> COverH(C), AStatic(G);
+	SparseMatrix<double, ColMajor> COverH(C), AStatic(G);
 
 	COverH /= stepSize;
 	AStatic += COverH;
@@ -432,7 +526,7 @@ void Netlist::solveTimeTrapezoidalRule(string& outputFilename)
 	if (fileWriter.fail())
 		Utilities::Error("problem opening the output file");
 
-	SparseMatrix<double, Eigen::ColMajor> COverH(C), GOverTwo(G), AStatic, BStatic;
+	SparseMatrix<double, ColMajor> COverH(C), GOverTwo(G), AStatic, BStatic;
 
 	COverH /= stepSize;
 	GOverTwo /= 2;
