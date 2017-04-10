@@ -27,6 +27,10 @@ void Utilities::Error(string message) {
 	exit(-1);
 }
 
+bool Utilities::areSame(double a, double b){
+	return fabs(a - b) < 0.1;
+}
+
 vector<string> Utilities::parseLine(string& nextLine)
 {
 	std::transform(nextLine.begin(), nextLine.end(), nextLine.begin(), ::tolower);

@@ -27,5 +27,6 @@ public:
 	static double convert(string& token);
 	static bool isANumber(string& token);
 	static string* splitString(string& token);
+	static bool areSame(double a, double b);
 };
 #endif

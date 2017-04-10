@@ -19,9 +19,10 @@
 #include "CNT.h"
 
 #include <Eigen/SparseLU>
+#include <Eigen/QR>
 #include <Eigen/Eigen>
-#include<Eigen/IterativeLinearSolvers>
 using Eigen::SparseLU;
+using Eigen::HouseholderQR;
 using Eigen::ColMajor;
 using Eigen::COLAMDOrdering;
 
@@ -274,29 +275,28 @@ void Netlist::solveFrequency(string& outputFilename)
 	SparseLU<SparseMatrix<std::complex<double>, ColMajor>, COLAMDOrdering<int>> solver;
 
 	for (int i = 0; i < numSteps; i++, currentFreq += stepSize) {
-		if (currentFreq > 0) {
-			//remove dc components from B matrix
-			BNew.setZero();
-			//set AC component magnitude to amplitude
-			BNew(VACNewIndex, 0) = VACAmplitude;
+		//remove dc components from B matrix
+		BNew.setZero();
+		//set AC component magnitude to amplitude
+		BNew(VACNewIndex, 0) = VACAmplitude;
 
-			//create static A matrix
-			wSweep = 2 * M_PI * currentFreq;
-			s.imag(wSweep);			
-			GPlusSC = G.cast<std::complex<double>>() + (s * C.cast<std::complex<double>>());
+		//create static A matrix
+		wSweep = 2 * M_PI * currentFreq;
+		s.imag(wSweep);			
+		GPlusSC = G.cast<std::complex<double>>() + (s * C.cast<std::complex<double>>());
 
-			//set up solver
-			GPlusSC.makeCompressed();
-			solver.compute(GPlusSC);
-			//solve system
-			XNew = solver.solve(BNew);
+		//set up solver
+		GPlusSC.makeCompressed();
+		solver.compute(GPlusSC);
 
-			magnitude = calcMagnitude(nodeToTrack, XNew);
-			phase = calcPhase(nodeToTrack, XNew);
+		//solve system
+		XNew = solver.solve(BNew);
 
-			//print to file
-			fileWriter << currentFreq << "\t" << magnitude << "\t" << phase << endl;
-		}
+		magnitude = calcMagnitude(nodeToTrack, XNew);
+		phase = calcPhase(nodeToTrack, XNew);
+
+		//print to file
+		fileWriter << currentFreq << "\t" << magnitude << "\t" << phase << endl;
 	}
 	fileWriter.close();
 }
@@ -304,6 +304,11 @@ void Netlist::solveFrequency(string& outputFilename)
 void Netlist::solveFrequencyMOR(string& outputFilename)
 {
 	cout << "Using Model Order Reduction" << endl;
+
+	const int size = numVoltages + numCurrents;
+	int numberOfMoments = 100;
+	int numberOfFreqHops = 1;
+	int newSize = numberOfMoments * numberOfFreqHops;
 
 	int VACNewIndex = 0;
 	double VACAmplitude = 0;
@@ -313,6 +318,8 @@ void Netlist::solveFrequencyMOR(string& outputFilename)
 	double magnitude = 0;
 	double phase = 0;
 
+	double maxFreq = 0;
+
 	//can only sweep one VAC Source at the moment
 	for (Component* c : circuitElements) {
 		if (VAC* p = dynamic_cast<VAC*> (c)) {
@@ -321,81 +328,214 @@ void Netlist::solveFrequencyMOR(string& outputFilename)
 			stepSize = (p->maxFrequency - p->minFrequency) / p->numSteps;
 			currentFreq = p->minFrequency;
 			numSteps = p->numSteps;
+			maxFreq = p->maxFrequency;
 			break;
 		}
 	}
+
+	/*
+	//setup B matrix to be normalized
+	Matrix<double, Dynamic, 1> BNew(size, 1), initialMoment(size, 1);
+	//remove dc components from B matrix
+	BNew.setZero();
+	initialMoment.setZero();
+
+	//set AC component magnitude to amplitude
+	BNew(VACNewIndex, 0) = VACAmplitude;
 
 	// attempt to open file
 	ofstream fileWriter(outputFilename);
 	if (fileWriter.fail())
 		Utilities::Error("problem opening the output file");
 
-	int numberOfMoments = 100;
-	const int size = numVoltages + numCurrents;
+	cout << "Generating Orthogonal Q Vectors" << endl;
 
-	//setup B matrix to be normalized
-	Matrix<double, Dynamic, 1> BNew(size, 1), Moment(size, 1);
-	//remove dc components from B matrix
-	BNew.setZero();
-	Moment.setZero();
-	//set AC component magnitude to amplitude
-	BNew(VACNewIndex, 0) = VACAmplitude;
-
-	Matrix<double, Dynamic, 1> prevMoment;
-	SparseMatrix<double, ColMajor> krylovSubspace(size, numberOfMoments);
-	//set up solver to find moments
+	SparseMatrix<double, ColMajor> negC = -C;
+	Matrix<double, Dynamic, 1> curVec;
+	
+	//set up solver
 	SparseLU<SparseMatrix<double, ColMajor>, COLAMDOrdering<int>> solver;
 	G.makeCompressed();
 	solver.compute(G);
-	//solve for first moment
-	prevMoment = solver.solve(BNew);
-	//add first moment to krylov subspace
-	krylovSubspace.col(0) = prevMoment.sparseView();
-	//use the first moment to generate the rest of the moments
-	for (int currentMoment = 1; currentMoment < numberOfMoments; currentMoment++) {
-		prevMoment = solver.solve(-C * prevMoment);
-		krylovSubspace.col(currentMoment) = prevMoment.sparseView();
+
+	//solve for initial moment
+	initialMoment = solver.solve(BNew);
+
+	SparseMatrix<double, ColMajor> qMatrix(size, numberOfMoments);
+	Matrix<double, Dynamic, 1> curVector(size, 1), curVectorPrime(size, 1);
+	//generate first Q vector
+	qMatrix.col(0) = initialMoment.sparseView() / initialMoment.norm();
+	//generate rest of Q vectors
+	for (int vectorIndex = 1; vectorIndex < numberOfMoments; vectorIndex++) {
+		//tempVector = A * prev Q vector
+		curVector = solver.solve(negC * qMatrix.col(vectorIndex - 1));
+		//calculate qVectorPrime
+		curVectorPrime = curVector;
+		for (int index = 0; index < vectorIndex; index++) {
+			curVectorPrime -= ((curVector.dot(qMatrix.col(index).toDense())) * qMatrix.col(index));
+		}
+		//create qVector
+		qMatrix.col(vectorIndex) = (curVectorPrime.sparseView() / curVectorPrime.norm());
 	}
 
-	cout << "Done generating krylov subspace" << endl;
-	/*
+	cout << "Done Making Q Vectors" << endl;
+
+	cout << "Generating Hat Matrices" << endl;
+	SparseMatrix<double, ColMajor> GHat, CHat;
+	Matrix<double, Dynamic, 1> BHat;
+	GHat = (qMatrix.transpose() * G) * qMatrix;
+	CHat = (qMatrix.transpose() * C) * qMatrix;
+	BHat = qMatrix.transpose() * B.sparseView();
+
+	cout << "Done making Hat Matrices" << endl;
+
+	SparseLU<SparseMatrix<std::complex<double>, ColMajor>, COLAMDOrdering<int>> complexSolver;
+	SparseMatrix<std::complex<double>, ColMajor> GPlusSC;
 	double wSweep;
 	std::complex<double> s;
-	const int size = numVoltages + numCurrents;
-	Matrix<std::complex<double>, Dynamic, 1> BNew(size, 1), XNew(size, 1);
+	Matrix<std::complex<double>, Dynamic, 1> BModifiable(numberOfMoments, 1), Z(numberOfMoments, 1), extractSolution(size, 1);
 
-	BNew.setZero();
-	XNew.setZero();
+	GPlusSC.setZero();
+	BModifiable.setZero();
+	Z.setZero();
 
-	
-
+	cout << "Solving" << endl;
 	for (int i = 0; i < numSteps; i++, currentFreq += stepSize) {
-		if (currentFreq > 0) {
-			//remove dc components from B matrix
-			BNew.setZero();
-			//set AC component magnitude to amplitude
-			BNew(VACNewIndex, 0) = VACAmplitude;
+		//reset BNew matrix
+		BModifiable = BHat;
 
-			//create static A matrix
-			wSweep = 2 * M_PI * currentFreq;
-			s.imag(wSweep);
-			GPlusSC = G.cast<std::complex<double>>() + (s * C.cast<std::complex<double>>());
+		//create static A matrix
+		wSweep = 2 * M_PI * currentFreq;
+		s.imag(wSweep);
+		GPlusSC = GHat.cast<std::complex<double>>() + (s * CHat.cast<std::complex<double>>());
 
-			//set up solver
-			GPlusSC.makeCompressed();
-			solver.compute(GPlusSC);
-			//solve system
-			XNew = solver.solve(BNew);
+		//set up solver
+		GPlusSC.makeCompressed();
+		complexSolver.compute(GPlusSC);
+		//solve system
+		Z = complexSolver.solve(BModifiable);
+		extractSolution = qMatrix * Z;
+		magnitude = calcMagnitude(nodeToTrack, extractSolution);
+		phase = calcPhase(nodeToTrack, extractSolution);
 
-			magnitude = calcMagnitude(nodeToTrack, XNew);
-			phase = calcPhase(nodeToTrack, XNew);
-
-			//print to file
-			fileWriter << currentFreq << "\t" << magnitude << "\t" << phase << endl;
-		}
+		//print to file
+		fileWriter << currentFreq << "\t" << magnitude << "\t" << phase << endl;
 	}
+	cout << "Done Solving" << endl;
 	fileWriter.close();
 	*/
+
+	// attempt to open file
+	ofstream fileWriter(outputFilename);
+	if (fileWriter.fail())
+		Utilities::Error("problem opening the output file");
+
+	cout << "Generating Orthogonal Q Vectors" << endl;
+
+	SparseMatrix<double, ColMajor> negC = -C;
+	Matrix<double, Dynamic, 1> curVec;
+
+	//set up solver
+	SparseLU<SparseMatrix<std::complex<double>, ColMajor>, COLAMDOrdering<int>> centerSolver;
+	double  freqStep = maxFreq / numberOfFreqHops;
+	int curCenter = 0;
+	SparseMatrix<std::complex<double>, ColMajor> GPlusSCCenter(size, size);
+
+	double wCenter;
+	std::complex<double> sCenter;
+
+	SparseMatrix < std::complex<double>, ColMajor > qMatrix(size, newSize);
+
+	//setup B matrix to be normalized
+	Matrix < std::complex<double>, Dynamic, 1 > BNew(size, 1), initialMoment(size, 1);
+
+	for (int curStep = 0; curStep < numberOfFreqHops; curStep++) {
+		//remove dc components from B matrix
+		BNew.setZero();
+		initialMoment.setZero();
+
+		//set AC component magnitude to amplitude
+		BNew(VACNewIndex, 0) = VACAmplitude;
+
+		if (curStep == 0) {
+			wCenter = 0;
+		}
+		else {
+			wCenter = 2 * M_PI * curStep * freqStep;
+		}
+
+		sCenter.imag(-wCenter);
+		GPlusSCCenter = G.cast<std::complex<double>>() + (sCenter * C.cast<std::complex<double>>());
+		GPlusSCCenter.makeCompressed();
+		centerSolver.compute(GPlusSCCenter);
+
+		int indexZero = curStep * numberOfMoments;
+
+		//solve for initial moment
+		initialMoment = centerSolver.solve(BNew);
+
+		Matrix<std::complex<double>, Dynamic, 1> curVector(size, 1), curVectorPrime(size, 1);
+		//generate first Q vector
+		qMatrix.col(indexZero) = initialMoment.sparseView() / initialMoment.norm();
+		//generate rest of Q vectors
+		for (int vectorIndex = indexZero + 1; vectorIndex < indexZero + numberOfMoments; vectorIndex++) {
+			//tempVector = A * prev Q vector
+			curVector = centerSolver.solve(negC.cast<std::complex<double>>() * qMatrix.col(vectorIndex - 1));
+			//calculate qVectorPrime
+			curVectorPrime = curVector;
+			for (int index = indexZero; index < vectorIndex; index++) {
+				curVectorPrime -= ((curVector.dot(qMatrix.col(index).toDense())) * qMatrix.col(index));
+			}
+			//create qVector
+			qMatrix.col(vectorIndex) = (curVectorPrime.sparseView() / curVectorPrime.norm());
+		}
+	}
+
+	cout << "Done Making Q Vectors" << endl;
+
+	cout << "Generating Hat Matrices" << endl;
+	SparseMatrix<std::complex<double>, ColMajor> GHat(newSize, newSize), CHat(newSize, newSize);
+	Matrix<std::complex<double>, Dynamic, 1> BHat(newSize, 1);
+	GHat = (qMatrix.transpose() * G.cast<std::complex<double>>()) * qMatrix;
+	CHat = (qMatrix.transpose() * C.cast<std::complex<double>>()) * qMatrix;
+	BHat = qMatrix.transpose() * B.cast<std::complex<double>>().sparseView();
+
+	cout << "Done making Hat Matrices" << endl;
+
+	SparseLU<SparseMatrix<std::complex<double>, ColMajor>, COLAMDOrdering<int>> complexSolver;
+	SparseMatrix<std::complex<double>, ColMajor> GPlusSC;
+	double wSweep;
+	std::complex<double> s;
+	Matrix<std::complex<double>, Dynamic, 1> BModifiable(newSize, 1), Z(newSize, 1), extractSolution(size, 1);
+
+	GPlusSC.setZero();
+	BModifiable.setZero();
+	Z.setZero();
+
+	cout << "Solving" << endl;
+	for (int i = 0; i < numSteps; i++, currentFreq += stepSize) {
+		//reset BNew matrix
+		BModifiable = BHat;
+
+		//create static A matrix
+		wSweep = 2 * M_PI * currentFreq;
+		s.imag(wSweep);
+		GPlusSC = GHat.cast<std::complex<double>>() + (s * CHat.cast<std::complex<double>>());
+
+		//set up solver
+		GPlusSC.makeCompressed();
+		complexSolver.compute(GPlusSC);
+		//solve system
+		Z = complexSolver.solve(BModifiable);
+		extractSolution = qMatrix * Z;
+		magnitude = calcMagnitude(nodeToTrack, extractSolution);
+		phase = calcPhase(nodeToTrack, extractSolution);
+
+		//print to file
+		fileWriter << currentFreq << "\t" << magnitude << "\t" << phase << endl;
+	}
+	cout << "Done Solving" << endl;
+	fileWriter.close();
 }
 
 void Netlist::solveTimeBackwardEuler(string& outputFilename)
